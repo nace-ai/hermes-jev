@@ -33,8 +33,9 @@ python3 tools/calibration/run_live.py /tmp/raw-nace-repro.jsonl \
 python3 tools/calibration/score.py /tmp/raw-nace-repro.jsonl
 ```
 
-Write to a new file. `run_live.py` appends, and it skips every request already in the output
-file, so pointing it at the committed JSONL would skip all 30 cases.
+Write to a new file. `run_live.py` appends, and it resumes a file only when every row records
+the same backend, model, roster (size and content digest), sample and seed. It refuses the
+committed JSONL, whose rows do not record all of them.
 
 **Not comparable with the 2026-09-21 run** (95%, 103-skill private roster, all 76 requests):
 different roster, different sample size. The two models below are comparable with each other.

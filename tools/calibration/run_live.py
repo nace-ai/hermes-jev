@@ -23,14 +23,18 @@ response to PATH with the Authorization value redacted. The dump is best effort:
 cannot be written, the runner says so on stderr and the call's result is unchanged.
 
 The runner appends to the output file and skips requests already in it. Every row records
-its backend, model, roster size, ``--sample`` and ``--seed`` (None when unused), and the
-runner resumes a file only when every row matches the current run. It refuses a file with other settings, or with rows that do not
-record them (such as the committed ``raw-2026-09-21.jsonl``): pass a new output path.
+its backend, model, roster size, roster digest, ``--sample`` and ``--seed`` (None when
+unused), and the runner resumes a file only when every row matches the current run. The
+roster digest is a SHA-256 of each skill's name, description and SKILL.md excerpt (what the
+two requests send), so a roster edited in place with the same skill count does not resume.
+It refuses a file with other settings, or with rows that do not record them (such as the
+committed raw files, all written before the digest): pass a new output path.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 import socket
@@ -85,6 +89,13 @@ def build_client(args: argparse.Namespace) -> JevClient:
                  "nace": "nace_model"}.get(resolved, "model")
         kw[field] = args.model
     return JevClient(**kw)
+
+
+def roster_digest(skills) -> str:
+    """SHA-256 of what the router sends per skill: name, description, SKILL.md excerpt."""
+    content = [[s.name, s.description, s.excerpt(router_mod.EXCERPT_CHARS)] for s in skills]
+    blob = json.dumps(content, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def resumable_requests(raw_path: Path, config: dict) -> set[str]:
@@ -253,6 +264,7 @@ def main(argv: list[str] | None = None) -> int:
              "gateway": client.model, "nace": client.nace_model}.get(backend or "")
     print(f"{len(cases)} cases · {len(skills)} skills · backend={backend} · model={model}")
     config = {"backend": backend, "model_requested": model, "roster": len(skills),
+              "roster_digest": roster_digest(skills),
               "sample": args.sample or None, "seed": args.seed if args.sample else None}
     try:
         done = resumable_requests(raw_path, config)

@@ -121,7 +121,7 @@ def test_model_goes_to_the_resolved_backend():
 
 
 NACE = {"backend": "nace", "model_requested": "drex-max-v1.1", "roster": 44,
-        "sample": 30, "seed": 325}
+        "roster_digest": "0" * 64, "sample": 30, "seed": 325}
 
 
 def write_rows(path: Path, rows: list[dict]) -> None:
@@ -141,7 +141,8 @@ def test_resume_refuses_other_config():
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "raw.jsonl"
         for other in ({**NACE, "backend": "typesafe"}, {**NACE, "model_requested": "drex-latest"},
-                      {**NACE, "roster": 103}, {**NACE, "seed": 326}, {**NACE, "sample": None}):
+                      {**NACE, "roster": 103}, {**NACE, "roster_digest": "1" * 64},
+                      {**NACE, "seed": 326}, {**NACE, "sample": None}):
             write_rows(path, [{"request": "a", **NACE}, {"request": "b", **other}])
             try:
                 run_live.resumable_requests(path, NACE)
@@ -150,6 +151,20 @@ def test_resume_refuses_other_config():
             else:
                 raise AssertionError(f"resumed a file written with {other}")
     print("ok  resume: refuses a file written with another backend, model, roster, sample or seed")
+
+
+def test_resume_refuses_rows_without_roster_digest():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "raw.jsonl"
+        old = {k: v for k, v in NACE.items() if k != "roster_digest"}  # written before the digest
+        write_rows(path, [{"request": "a", **old}])
+        try:
+            run_live.resumable_requests(path, NACE)
+        except ValueError as exc:
+            assert "does not record" in str(exc) and "roster_digest" in str(exc), exc
+        else:
+            raise AssertionError("resumed rows that do not record the roster digest")
+    print("ok  resume: refuses rows written before the roster digest")
 
 
 def test_resume_refuses_unidentified_rows():
@@ -322,6 +337,31 @@ def test_main_refuses_another_seed():
     print("ok  main: a --seed 326 run refuses a --seed 325 file before any HTTP call")
 
 
+def test_main_refuses_same_size_roster_with_other_content():
+    with offline_run() as (root, roster, calls):
+        path = root / "raw.jsonl"
+        argv = [str(path), "--backend", "nace", "--roster", str(roster)]
+        code, err = run_main(argv)
+        assert code == 0, err
+        first = rows(path)
+        assert first[0]["roster"] == 2 and len(first[0]["roster_digest"]) == 64, first[0]
+        skill = roster / "pdf" / "SKILL.md"
+        original = skill.read_text(encoding="utf-8")
+        for old, new in (("description: pdf files", "description: pdf documents"),
+                         ("Body.", "New body.")):
+            skill.write_text(original.replace(old, new), encoding="utf-8")
+            calls.clear()
+            code, err = run_main(argv)  # still 2 skills, other content
+            assert code == 2 and "refusing to resume" in err and "roster_digest" in err, (code, err)
+            assert calls == [], calls
+            assert rows(path) == first
+            skill.write_text(original, encoding="utf-8")
+        calls.clear()
+        code, err = run_main(argv)  # roster back as it was: resumes with no new calls
+        assert code == 0 and calls == [], (code, err, calls)
+    print("ok  main: a same-size roster with another description or body is refused")
+
+
 if __name__ == "__main__":
     for fn in (
         test_dump_written_and_redacted,
@@ -331,11 +371,13 @@ if __name__ == "__main__":
         test_resume_matching_config,
         test_resume_refuses_other_config,
         test_resume_refuses_unidentified_rows,
+        test_resume_refuses_rows_without_roster_digest,
         test_resume_names_file_and_line_of_a_broken_row,
         test_append_after_a_row_without_final_newline,
         test_main_refuses_mismatched_file_before_any_call,
         test_main_no_flag_run_then_resumes_without_calls,
         test_main_refuses_another_seed,
+        test_main_refuses_same_size_roster_with_other_content,
     ):
         fn()
     print("\nall run_live offline tests passed")
