@@ -125,7 +125,7 @@ def test_model_goes_to_the_resolved_backend():
 
 
 NACE = {"backend": "nace", "model_requested": "drex-max-v1.1", "roster": 44,
-        "roster_digest": "0" * 64, "sample": 30, "seed": 325}
+        "roster_digest": "0" * 64, "cases_digest": "2" * 64, "sample": 30, "seed": 325}
 
 
 def write_rows(path: Path, rows: list[dict]) -> None:
@@ -146,6 +146,7 @@ def test_resume_refuses_other_config():
         path = Path(tmp) / "raw.jsonl"
         for other in ({**NACE, "backend": "typesafe"}, {**NACE, "model_requested": "drex-latest"},
                       {**NACE, "roster": 103}, {**NACE, "roster_digest": "1" * 64},
+                      {**NACE, "cases_digest": "3" * 64},
                       {**NACE, "seed": 326}, {**NACE, "sample": None}):
             write_rows(path, [{"request": "a", **NACE}, {"request": "b", **other}])
             try:
@@ -378,6 +379,32 @@ def test_main_refuses_same_size_roster_with_other_content():
     print("ok  main: a same-size roster with another description or body is refused")
 
 
+def test_main_refuses_relabelled_cases():
+    with offline_run() as (root, roster, calls):
+        path = root / "raw.jsonl"
+        argv = [str(path), "--backend", "nace", "--roster", str(roster)]
+        code, err = run_main(argv)
+        assert code == 0, err
+        first = rows(path)
+        assert len(first[0]["cases_digest"]) == 64, first[0]
+        original = run_live.LABELLED.read_text(encoding="utf-8")
+        relabelled = [dict(c) for c in CASES]
+        relabelled[1]["expected"] = "pdf"  # same requests, another expected label
+        reordered = [CASES[1], CASES[0], CASES[2]]
+        for cases in (relabelled, reordered):
+            run_live.LABELLED.write_text(json.dumps(cases), encoding="utf-8")
+            calls.clear()
+            code, err = run_main(argv)
+            assert code == 2 and "refusing to resume" in err and "cases_digest" in err, (code, err)
+            assert calls == [], calls
+            assert rows(path) == first
+        run_live.LABELLED.write_text(original, encoding="utf-8")
+        calls.clear()
+        code, err = run_main(argv)  # labels back as they were: resumes with no new calls
+        assert code == 0 and calls == [], (code, err, calls)
+    print("ok  main: a changed expected label or case order is refused before any HTTP call")
+
+
 if __name__ == "__main__":
     for fn in (
         test_dump_written_and_redacted,
@@ -395,6 +422,7 @@ if __name__ == "__main__":
         test_main_no_flag_run_then_resumes_without_calls,
         test_main_refuses_another_seed,
         test_main_refuses_same_size_roster_with_other_content,
+        test_main_refuses_relabelled_cases,
     ):
         fn()
     print("\nall run_live offline tests passed")
