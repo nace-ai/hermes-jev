@@ -107,7 +107,9 @@ def resumable_requests(raw_path: Path, config: dict) -> set[str]:
         text = raw_path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
         raise ValueError(f"{raw_path} is not UTF-8 text ({exc}). Pass a new output path.") from exc
-    for number, line in enumerate(text.splitlines(), 1):
+    # Split on "\n" only: rows keep U+2028/U+2029 literally (ensure_ascii=False), and
+    # str.splitlines() would cut a row there.
+    for number, line in enumerate(text.split("\n"), 1):
         if not line.strip():
             continue
         try:

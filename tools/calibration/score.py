@@ -67,13 +67,18 @@ def rates(rows: list[dict], gate_t: float, fits_t: float) -> dict:
     }
 
 
-def main() -> int:
-    path = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "raw-2026-09-21.jsonl"
-    rows = [
+def load_rows(path: Path) -> list[dict]:
+    """One row per "\n"-terminated line. Not splitlines(): rows keep U+2028/U+2029 literally."""
+    return [
         json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
+        for line in path.read_text(encoding="utf-8").split("\n")
         if line.strip()
     ]
+
+
+def main() -> int:
+    path = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "raw-2026-09-21.jsonl"
+    rows = load_rows(path)
     print(f"# Router calibration — {len(rows)} requests ({path.name})\n")
     failed = [r for r in rows if r.get("fail_open")]
     print(f"fail-open rows: {len(failed)}")

@@ -24,6 +24,10 @@ run_live = importlib.util.module_from_spec(spec)
 sys.modules["run_live"] = run_live
 spec.loader.exec_module(run_live)
 
+score_spec = importlib.util.spec_from_file_location("score", HERE / "score.py")
+score = importlib.util.module_from_spec(score_spec)
+score_spec.loader.exec_module(score)
+
 BODY = {"answers": {}, "model": "drex-max-v1.1", "request_id": "req_test", "usage": {"input_tokens": 7}}
 
 
@@ -214,6 +218,18 @@ def test_append_after_a_row_without_final_newline():
     print("ok  append: a last row without a final newline gets one before the next row")
 
 
+def test_unicode_line_separators_stay_inside_a_row():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "raw.jsonl"
+        tricky = "split\u2028here\u2029and\x85there"
+        run_live.append_row(path, {"request": tricky, **NACE})
+        run_live.append_row(path, {"request": "b", **NACE})
+        assert "\u2028" in path.read_text(encoding="utf-8")  # written literally, not escaped
+        assert run_live.resumable_requests(path, NACE) == {tricky, "b"}
+        assert [r["request"] for r in score.load_rows(path)] == [tricky, "b"]
+    print("ok  resume + score: U+2028/U+2029/U+0085 in a string do not split the row")
+
+
 # --- main() end to end: fake transport, temp roster, three labelled cases ---------------
 
 CLIENT = sys.modules["jev_router.client"]
@@ -287,7 +303,7 @@ def run_main(argv: list[str]) -> tuple[int, str]:
 
 
 def rows(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line]
 
 
 def test_main_refuses_mismatched_file_before_any_call():
@@ -374,6 +390,7 @@ if __name__ == "__main__":
         test_resume_refuses_rows_without_roster_digest,
         test_resume_names_file_and_line_of_a_broken_row,
         test_append_after_a_row_without_final_newline,
+        test_unicode_line_separators_stay_inside_a_row,
         test_main_refuses_mismatched_file_before_any_call,
         test_main_no_flag_run_then_resumes_without_calls,
         test_main_refuses_another_seed,
