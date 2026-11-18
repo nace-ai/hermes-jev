@@ -185,6 +185,20 @@ def test_resume_names_file_and_line_of_a_broken_row():
     print("ok  resume: a cut-off or non-UTF-8 file is refused with its path and line")
 
 
+def test_append_after_a_row_without_final_newline():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "raw.jsonl"
+        path.write_text(json.dumps({"request": "a", **NACE}), encoding="utf-8")  # no final \n
+        assert run_live.resumable_requests(path, NACE) == {"a"}
+        run_live.append_row(path, {"request": "b", **NACE})
+        assert path.read_text(encoding="utf-8").count("\n") == 2
+        assert run_live.resumable_requests(path, NACE) == {"a", "b"}
+        run_live.append_row(path, {"request": "c", **NACE})  # file ends with \n: no blank line
+        assert path.read_text(encoding="utf-8").count("\n") == 3
+        assert run_live.resumable_requests(path, NACE) == {"a", "b", "c"}
+    print("ok  append: a last row without a final newline gets one before the next row")
+
+
 # --- main() end to end: fake transport, temp roster, three labelled cases ---------------
 
 CLIENT = sys.modules["jev_router.client"]
@@ -318,6 +332,7 @@ if __name__ == "__main__":
         test_resume_refuses_other_config,
         test_resume_refuses_unidentified_rows,
         test_resume_names_file_and_line_of_a_broken_row,
+        test_append_after_a_row_without_final_newline,
         test_main_refuses_mismatched_file_before_any_call,
         test_main_no_flag_run_then_resumes_without_calls,
         test_main_refuses_another_seed,

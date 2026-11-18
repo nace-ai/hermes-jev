@@ -124,6 +124,18 @@ def resumable_requests(raw_path: Path, config: dict) -> set[str]:
     return done
 
 
+def append_row(raw_path: Path, row: dict) -> None:
+    """Append one JSONL row; start a new line first if the file does not end with one."""
+    prefix = ""
+    if raw_path.exists() and raw_path.stat().st_size:
+        with raw_path.open("rb") as fh:
+            fh.seek(-1, 2)
+            if fh.read(1) != b"\n":
+                prefix = "\n"
+    with raw_path.open("a", encoding="utf-8") as fh:
+        fh.write(prefix + json.dumps(row, ensure_ascii=False) + "\n")
+
+
 class Recorder:
     """Wraps the client's transport: per-call status, latency, ids. Never stores keys."""
 
@@ -302,8 +314,7 @@ def main(argv: list[str] | None = None) -> int:
         row.update(config)
         if args.backend != "auto" or args.model or args.sample:
             row["calls"] = list(recorder.calls)
-        with raw_path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        append_row(raw_path, row)
         verdict = (
             "fail-open"
             if row.get("fail_open")
